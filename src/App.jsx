@@ -11,10 +11,10 @@ const CATEGORIES = {
         "Viajes": ["BlaBlaCar"],
     },
     gasto: {
-        "Casa": ["Alquiler", "Gasoil", "Electricidad", "Agua", "Teléfono", "Otros"],
+        "Casa": ["Alquiler", "Gasoil", "Electricidad", "Agua", "Teléfono"],
         "Supermercado": [],
-        "Ocio": ["Comer fuera", "Tomar algo", "Entradas", "Actividades", "Otros"],
-        "Otros": ["Compra", "Salud", "Otros"],
+        "Ocio": ["Comer fuera", "Tomar algo", "Entradas", "Actividades"],
+        "Otros": ["Compra", "Salud"],
         "Viajes": ["Transporte", "Gasolina", "Peajes", "Aparcamientos", "Alojamiento", "Comer fuera", "Tomar algo (snacks/helados)", "Souvenirs", "Actividades", "Seguro", "Internet", "Otros"],
     },
 };
@@ -27,6 +27,14 @@ const isoDaysAgo = (n) => {
     const d = new Date();
     d.setDate(d.getDate() - n);
     return d.toISOString().slice(0, 10);
+};
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const monthKey = (iso) => iso.slice(0, 7);
+const monthLabel = (key) => {
+    const [y, m] = key.split("-");
+    const d = new Date(Number(y), Number(m) - 1, 1);
+    const s = d.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+    return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
 function subcatsFor(categoria) {
@@ -168,15 +176,32 @@ export default function App() {
 
 /* ---------- RESUMEN ---------- */
 function Resumen({ transactions }) {
-    const [rango, setRango] = useState("mes");
+    const [rango, setRango] = useState("ultimos30"); // 'ultimos30' | 'ultimos90' | 'todo' | 'mesConcreto' | 'personalizado'
     const [vista, setVista] = useState("gasto"); // 'gasto' | 'ingreso' | 'ambos'
+    const [mesElegido, setMesElegido] = useState(monthKey(todayISO()));
+    const [desdeFiltro, setDesdeFiltro] = useState("");
+    const [hastaFiltro, setHastaFiltro] = useState("");
+
+    const mesesDisponibles = useMemo(() => {
+        const set = new Set(transactions.map((t) => monthKey(t.fecha)));
+        set.add(monthKey(todayISO()));
+        return Array.from(set).sort().reverse();
+    }, [transactions]);
 
     const filtradas = useMemo(() => {
         if (rango === "todo") return transactions;
-        const limite = rango === "mes" ? 30 : 90;
-        const desde = isoDaysAgo(limite);
-        return transactions.filter((t) => t.fecha >= desde);
-    }, [transactions, rango]);
+        if (rango === "ultimos30" || rango === "ultimos90") {
+            const desde = isoDaysAgo(rango === "ultimos30" ? 30 : 90);
+            return transactions.filter((t) => t.fecha >= desde);
+        }
+        if (rango === "mesConcreto") {
+            return transactions.filter((t) => monthKey(t.fecha) === mesElegido);
+        }
+        if (rango === "personalizado") {
+            return transactions.filter((t) => (!desdeFiltro || t.fecha >= desdeFiltro) && (!hastaFiltro || t.fecha <= hastaFiltro));
+        }
+        return transactions;
+    }, [transactions, rango, mesElegido, desdeFiltro, hastaFiltro]);
 
     const totals = useMemo(() => {
         const ingresos = filtradas.filter((t) => t.tipo === "ingreso").reduce((s, t) => s + Number(t.monto), 0);
@@ -197,11 +222,39 @@ function Resumen({ transactions }) {
 
     return (
         <div className="flex flex-col gap-5">
-            <div className="flex gap-2">
-                <Chip active={rango === "mes"} onClick={() => setRango("mes")}>Últimos 30 días</Chip>
-                <Chip active={rango === "90dias"} onClick={() => setRango("90dias")}>Últimos 90 días</Chip>
+            <div className="flex flex-wrap gap-2">
+                <Chip active={rango === "ultimos30"} onClick={() => setRango("ultimos30")}>Últimos 30 días</Chip>
+                <Chip active={rango === "ultimos90"} onClick={() => setRango("ultimos90")}>Últimos 90 días</Chip>
+                <Chip active={rango === "mesConcreto"} onClick={() => setRango("mesConcreto")}>Mes concreto</Chip>
+                <Chip active={rango === "personalizado"} onClick={() => setRango("personalizado")}>Rango de fechas</Chip>
                 <Chip active={rango === "todo"} onClick={() => setRango("todo")}>Todo</Chip>
             </div>
+
+            {rango === "mesConcreto" && (
+                <div className="relative max-w-xs">
+                    <select
+                        value={mesElegido}
+                        onChange={(e) => setMesElegido(e.target.value)}
+                        className="w-full appearance-none rounded-lg border border-[#D8D2C4] bg-white px-3 py-2.5 pr-9 text-[15px] text-[#1C2B33] focus:outline-none focus:ring-2 focus:ring-[#2D6A63]/40"
+                    >
+                        {mesesDisponibles.map((k) => <option key={k} value={k}>{monthLabel(k)}</option>)}
+                    </select>
+                    <ChevronDown size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7280]" />
+                </div>
+            )}
+
+            {rango === "personalizado" && (
+                <div className="grid max-w-sm grid-cols-2 gap-3">
+                    <div>
+                        <label className="mb-1 block text-xs text-[#8A8E86]">Desde</label>
+                        <input type="date" value={desdeFiltro} onChange={(e) => setDesdeFiltro(e.target.value)} className="w-full rounded-lg border border-[#D8D2C4] bg-white px-3 py-2 text-[14px] text-[#1C2B33] focus:outline-none focus:ring-2 focus:ring-[#2D6A63]/40" />
+                    </div>
+                    <div>
+                        <label className="mb-1 block text-xs text-[#8A8E86]">Hasta</label>
+                        <input type="date" value={hastaFiltro} onChange={(e) => setHastaFiltro(e.target.value)} className="w-full rounded-lg border border-[#D8D2C4] bg-white px-3 py-2 text-[14px] text-[#1C2B33] focus:outline-none focus:ring-2 focus:ring-[#2D6A63]/40" />
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-3 gap-3">
                 <Card label="Ingresos" value={totals.ingresos} color="#2D6A63" Icon={TrendingUp} />
